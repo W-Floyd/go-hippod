@@ -25,6 +25,10 @@ import (
 // frames of -replay-stock, which are what the stock HAL sends on a unit whose
 // protocol mask is not 3; nothing else is ever composed.
 //
+// -tap SOCKET lets another process watch the frames of a running hippod, which
+// owns the UART: hippod -attach SOCKET prints them, one line each with the
+// time, until it is stopped.
+//
 // -out "-" is stdout (and then -dump goes to stderr); a path on Linux becomes
 // a pty whose slave end gpsd can open (the path is a symlink to it); file:PATH
 // appends to a file.
@@ -39,11 +43,20 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	replay := fs.Bool("replay-stock", false, "send the two set frames the stock HAL sends (NMEA control, protocol mask 3); changes the module")
 	wait := fs.Duration("wait", 3*time.Second, "how long -query listens for replies")
 	altDR := fs.Bool("alt-dr", false, "take the GGA altitude from the DR message when the module sends no 0x70/0x22 (a guess)")
+	tapPath := fs.String("tap", "", "serve every frame with its decoded fields, with the time, on this unix socket, for -attach (not with -query)")
+	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
+	}
+	if *attach != "" {
+		if err := Attach(*attach, stdout); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
 	}
 	if *dev == "" {
 		fs.Usage()
@@ -56,6 +69,19 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		cfg.Dump = stdout
 		if *out == "-" {
 			cfg.Dump = stderr
+		}
+	}
+	if *tapPath != "" && !*query {
+		tap, err := ListenTap(*tapPath)
+		if err != nil {
+			lg.Print(err)
+			return 1
+		}
+		defer tap.Close()
+		if cfg.Dump == nil {
+			cfg.Dump = stamped{tap}
+		} else {
+			cfg.Dump = io.MultiWriter(cfg.Dump, stamped{tap})
 		}
 	}
 	if *query {

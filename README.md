@@ -48,6 +48,12 @@ and exits. The only frames that change the module are the two of
 sends on the product models `wp_opio` and `opio` when the module reports another
 mask), and they are sent only if that flag is given.
 
+The daemon owns the UART, so nothing else can read it. `-tap /run/hippod.sock`
+serves every frame, as `-dump` prints it and with the time, on a unix socket
+(mode 0660); `hippod -attach /run/hippod.sock` from another shell prints them live
+until stopped, and any number can attach. A reader that cannot keep up loses lines
+and never slows the daemon. `-tap` does not apply to `-query`.
+
 ## What is known
 
 Every layout below was read from a disassembly of the HAL, never from a capture
