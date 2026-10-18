@@ -46,6 +46,7 @@ type GGAData struct {
 	HDOP           float64
 	HasAlt         bool
 	AltMSL, Sep    float64
+	HasSep         bool // the geoid separation is known; empty when not
 }
 
 // GGA is the $GPGGA sentence, laid out like the HAL's template at 0xb810:
@@ -62,7 +63,11 @@ func GGA(g GGAData) string {
 	}
 	fmt.Fprintf(&sb, "%d,%02d,%.1f,", g.Quality, g.Sats, g.HDOP)
 	if g.HasAlt {
-		fmt.Fprintf(&sb, "%.1f,M,%.1f,M,,", g.AltMSL, g.Sep)
+		fmt.Fprintf(&sb, "%.1f,M,", g.AltMSL)
+		if g.HasSep {
+			fmt.Fprintf(&sb, "%.1f", g.Sep)
+		}
+		sb.WriteString(",M,,")
 	} else {
 		sb.WriteString(",M,,M,,")
 	}

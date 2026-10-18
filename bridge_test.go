@@ -112,6 +112,25 @@ func TestConverterAltFromDR(t *testing.T) {
 	}
 }
 
+// The 0x31 altitude (int16 metres) is the default when it is valid, with no
+// separation; an invalid one, or none, leaves the field empty.
+func TestConverterAltFromFix(t *testing.T) {
+	var c Converter
+	fix := fixBody(FixValid)
+	fix[7] = 1 << 1 // altitude valid
+	le16(fix, 16, 293)
+	out := feed(&c, utcBody(0), fix, packRawDR(1, 2, 0, 0, 0))
+	if g := pick(out, "GPGGA"); g[9] != "293.0" || g[10] != "M" || g[11] != "" || g[12] != "M" {
+		t.Errorf("altitude fields %q", g[9:])
+	}
+	var d Converter
+	fix[7] = 0
+	out = feed(&d, utcBody(0), fix, packRawDR(1, 2, 0, 0, 0))
+	if g := pick(out, "GPGGA"); g[9] != "" {
+		t.Errorf("an invalid altitude must leave the field empty, got %v", g)
+	}
+}
+
 func TestConverterGSV(t *testing.T) {
 	var c Converter
 	chans := [][]byte{

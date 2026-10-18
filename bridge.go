@@ -7,9 +7,9 @@ package hippo
 // 0x31/2). Date and time come from the last UTC message (0x32), so nothing is
 // emitted before one has been seen.
 type Converter struct {
-	// AltFromDR takes the altitude from RawDR (a guess: the HAL prints the
-	// mean-sea-level altitude of message 0x70/0x22, which the module may not
-	// send) when no 0x70/0x22 has been seen.
+	// AltFromDR takes the altitude from RawDR when neither a 0x70/0x22 nor a
+	// valid 0x31 altitude has been seen. A guess, and on the unit it was
+	// measured to read about 170 m high, so it is off by default.
 	AltFromDR bool
 
 	utc   *UTC
@@ -81,7 +81,13 @@ func (c *Converter) position() []string {
 	}
 	switch {
 	case c.ext != nil:
-		g.HasAlt, g.AltMSL, g.Sep = true, c.ext.AltMSL, c.ext.AltHAE-c.ext.AltMSL
+		g.HasAlt, g.AltMSL, g.Sep, g.HasSep = true, c.ext.AltMSL, c.ext.AltHAE-c.ext.AltMSL, true
+	case c.fix != nil && c.fix.AltValid:
+		// Measured on the unit: the 0x31 altitude is the one that matches
+		// the true height above sea level (metres, int16); the 0x30 and
+		// 0x70/0x32 ones read about 170 m high. No separation is sent: the
+		// module has none that agrees with it.
+		g.HasAlt, g.AltMSL = true, float64(c.fix.Alt)
 	case c.AltFromDR && bit(r.Flags2, 1):
 		g.HasAlt, g.AltMSL = true, float64(r.Alt)
 	}

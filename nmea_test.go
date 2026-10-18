@@ -61,7 +61,7 @@ func TestCoord(t *testing.T) {
 
 func TestGGAandRMCFields(t *testing.T) {
 	g := checkSentence(t, GGA(GGAData{Hour: 9, Min: 5, Sec: 7, HasPos: true, Lat: 48.1173, Lon: 11.516666666,
-		Quality: 1, Sats: 8, HDOP: 0.94, HasAlt: true, AltMSL: 545.44, Sep: 46.9}))
+		Quality: 1, Sats: 8, HDOP: 0.94, HasAlt: true, AltMSL: 545.44, Sep: 46.9, HasSep: true}))
 	want := "GPGGA 090507.00 4807.038000 N 01131.000000 E 1 08 0.9 545.4 M 46.9 M  "
 	if got := strings.Join(g, " "); got != want {
 		t.Errorf("GGA\n got %q\nwant %q", got, want)
