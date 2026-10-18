@@ -16,6 +16,7 @@ import (
 // written to it.
 type PTY struct {
 	master, slave *os.File
+	fd            int // master's, non-blocking: Fd on the file would undo that
 	link          string
 }
 
@@ -26,7 +27,13 @@ func OpenPTY(link string) (*PTY, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Fd puts the file back in blocking mode, and a write with nobody reading
+	// would then wait for ever, so non-blocking again for Write below.
 	fd := int(m.Fd())
+	if err := unix.SetNonblock(fd, true); err != nil {
+		m.Close()
+		return nil, err
+	}
 	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
 		m.Close()
 		return nil, fmt.Errorf("unlockpt: %w", err)
@@ -65,17 +72,24 @@ func OpenPTY(link string) (*PTY, error) {
 		s.Close()
 		return nil, err
 	}
-	return &PTY{master: m, slave: s, link: link}, nil
+	return &PTY{master: m, slave: s, fd: fd, link: link}, nil
 }
 
 // Write sends p to the slave end. A full buffer (nobody reading) drops the
 // data instead of blocking the reader of the module.
 func (p *PTY) Write(b []byte) (int, error) {
-	n, err := p.master.Write(b)
-	if errors.Is(err, syscall.EAGAIN) {
-		return len(b), nil
+	// Not through the os.File: it stays registered with Go's poller, which waits
+	// for room on EAGAIN instead of returning it.
+	for {
+		_, err := unix.Write(p.fd, b)
+		switch {
+		case err == nil, errors.Is(err, syscall.EAGAIN):
+			return len(b), nil
+		case errors.Is(err, syscall.EINTR):
+			continue
+		}
+		return 0, err
 	}
-	return n, err
 }
 
 // Close removes the link and closes both ends.
