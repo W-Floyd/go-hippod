@@ -54,6 +54,47 @@ serves every frame, as `-dump` prints it and with the time, on a unix socket
 until stopped, and any number can attach. A reader that cannot keep up loses lines
 and never slows the daemon. `-tap` does not apply to `-query`.
 
+### GeoClue
+
+GeoClue has no gpsd source; its `network-nmea` source reads NMEA from a socket
+(GeoClue 2.8.2, `src/gclue-nmea-source.c`). `-nmea-tcp ADDR` serves the same
+NMEA as `-out` to any number of clients, on a TCP `host:port` (say
+`127.0.0.1:10110`) or `unix:PATH` (mode 0666). Off by default; `-out`, `-tap`
+and `-query` are unaffected, and `-nmea-tcp` does not apply to `-query`.
+
+The module emits a GGA/RMC/VTG set per DR frame, about 10 a second, all with the
+same whole-second time. The stream is thinned to the first GGA and the first RMC
+of each UTC second (compared by their `hhmmss` field), VTG only with the GGA
+that passed, and every GSV. A client too slow to keep up loses sentences and
+never slows the reader.
+
+GeoClue takes a fix from a GGA with quality other than 0 and valid coordinates
+(accuracy from HDOP: 1 or less is 0 m, 2 is 1 m, 5 is 3 m) and an RMC with status
+`A` (speed, heading); it ignores the checksum, VTG, GSV and GST, and an empty
+altitude is fine. It finds the stream either through avahi, as
+`_nmea-0183._tcp` (it connects to the advertised *host name*, resolved by the
+system resolver, not the address avahi found), or from `nmea-socket=PATH` in
+`geoclue.conf`'s `[network-nmea]` section, which needs no avahi, hostname or
+network:
+
+    # /etc/geoclue/conf.d/90-hippod.conf
+    [network-nmea]
+    nmea-socket=/run/hippod-nmea.sock
+
+with `hippod ... -nmea-tcp unix:/run/hippod-nmea.sock`. For avahi, a static
+`/etc/avahi/services/hippod-nmea.service`:
+
+    <?xml version="1.0" standalone='no'?>
+    <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+    <service-group>
+      <name replace-wildcards="yes">%h GNSS</name>
+      <service>
+        <type>_nmea-0183._tcp</type>
+        <port>10110</port>
+        <txt-record>accuracy=exact</txt-record>
+      </service>
+    </service-group>
+
 ## What is known
 
 Every layout below was read from a disassembly of the HAL, never from a capture

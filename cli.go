@@ -29,6 +29,10 @@ import (
 // owns the UART: hippod -attach SOCKET prints them, one line each with the
 // time, until it is stopped.
 //
+// -nmea-tcp ADDR serves the same NMEA to any number of clients on a TCP
+// host:port (or unix:PATH), thinned to one GGA/RMC/VTG set per UTC second, which
+// is what GeoClue's network-nmea source wants; -out is unchanged.
+//
 // -out "-" is stdout (and then -dump goes to stderr); a path on Linux becomes
 // a pty whose slave end gpsd can open (the path is a symlink to it); file:PATH
 // appends to a file.
@@ -44,6 +48,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	wait := fs.Duration("wait", 3*time.Second, "how long -query listens for replies")
 	altDR := fs.Bool("alt-dr", false, "take the GGA altitude from the DR message when the module sends no 0x70/0x22 (a guess)")
 	tapPath := fs.String("tap", "", "serve every frame with its decoded fields, with the time, on this unix socket, for -attach (not with -query)")
+	nmeaNet := fs.String("nmea-tcp", "", "also serve the NMEA, one position set per UTC second, on this TCP host:port or unix:PATH, for GeoClue (not with -query)")
 	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -99,6 +104,15 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		}
 		defer closeOut()
 		cfg.Out = w
+		if *nmeaNet != "" {
+			srv, err := ListenNMEA(*nmeaNet)
+			if err != nil {
+				lg.Print(err)
+				return 1
+			}
+			defer srv.Close()
+			cfg.Out = teeWriter{w, srv}
+		}
 	}
 	if *replay {
 		cfg.Send = append(cfg.Send, ReplayStock()...)
