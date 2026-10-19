@@ -35,7 +35,7 @@ exported `Main`.
 
 ## Command
 
-    hippod -dev /dev/ttyAMA3 [-baud 115200] [-out PATH|-|file:PATH] [-dump] [-query] [-replay-stock]
+    hippod -dev /dev/ttyAMA3 [-baud 115200] [-out PATH|-|file:PATH] [-dump] [-query] [-replay-stock] [-gpsd] [-nmea-tcp ADDR]
 
 By default it only reads. `-out PATH` makes a pty (Linux) and a symlink to its
 slave end at PATH, which gpsd opens like a serial port; `-out -` is stdout and
@@ -54,6 +54,27 @@ serves every frame, as `-dump` prints it and with the time, on a unix socket
 until stopped, and any number can attach. A reader that cannot keep up loses lines
 and never slows the daemon. `-tap` does not apply to `-query`.
 
+### gpsd
+
+`-out` is what gpsd reads, and by default it is the HAL's sentences, ten
+position sets a second. `-gpsd` makes it a better feed, and changes nothing
+without it: it adds `$GNGSA` (fix mode: 3 with an altitude, 2 without, 1 with no
+position; the ids of the satellites in use from the 0x70/0x24 message, twelve to
+a sentence; PDOP, HDOP and VDOP from 0x32) and `$GPGST` (the 0x30 position and
+altitude accuracy, taken as metres, which is a guess: its unit is not stated),
+and writes one GGA/RMC/VTG/GSA/GST set per UTC second (`Thin`, below). The talker
+is `GN` on purpose: gpsd accumulates consecutive `GN` GSAs but starts over at
+every second `GP` one, and it reads `GP` ids as GPS/SBAS only, so the 2xx
+(BeiDou) ids would not match the satellites of the GSV. With it gpsd
+shows PDOP/VDOP, `uSat` and `used` per satellite, and `epx`/`epy`/`epv`, which
+it had no way to know before. Not changed: GGA quality stays 6 while the DR flag
+is set, so gpsd reports status 5 (estimated).
+
+What gpsd cannot take from NMEA, so a native driver would add it: the DR
+bearing and its accuracy, the gyro and tacho counts, the DR/GNSS split of the
+solution (and the 0x31 fix status, DGPS flag and vertical speed), the per-axis
+sensor and Kalman-filter data of 0x70, and the time source.
+
 ### GeoClue
 
 GeoClue has no gpsd source; its `network-nmea` source reads NMEA from a socket
@@ -64,8 +85,8 @@ and `-query` are unaffected, and `-nmea-tcp` does not apply to `-query`.
 
 The module emits a GGA/RMC/VTG set per DR frame, about 10 a second, all with the
 same whole-second time. The stream is thinned to the first GGA and the first RMC
-of each UTC second (compared by their `hhmmss` field), VTG only with the GGA
-that passed, and every GSV. A client too slow to keep up loses sentences and
+of each UTC second (compared by their `hhmmss` field), VTG (and with `-gpsd` GSA
+and GST) only with the GGA that passed, and every GSV. A client too slow to keep up loses sentences and
 never slows the reader.
 
 GeoClue takes a fix from a GGA with quality other than 0 and valid coordinates

@@ -13,8 +13,8 @@ import (
 // NMEAServer streams NMEA to whoever connects, for consumers that read it over
 // a socket (GeoClue's network-nmea source). Like Tap, a client too slow to keep
 // up loses sentences and never holds the reader back. Unlike Tap it is thinned
-// to one position set per UTC second, because the module's DR rate is ~10 Hz
-// with the same whole-second time and consumers want about one fix a second.
+// to one position set per UTC second (Thin): consumers want about one fix a
+// second.
 //
 // It is an io.Writer: each Write is one sentence, as Run writes them.
 type NMEAServer struct {
@@ -22,14 +22,13 @@ type NMEAServer struct {
 	ln      net.Listener
 	mu      sync.Mutex
 	clients map[chan string]struct{}
-	last    map[string]string // sentence type -> time field last passed
-	vtg     bool              // a GGA passed, so its VTG does too
+	thin    Thin
 }
 
 // ListenNMEA serves addr: "unix:PATH" (mode 0666, a stale socket is replaced;
 // the consumer may be another user) or a TCP host:port.
 func ListenNMEA(addr string) (*NMEAServer, error) {
-	s := &NMEAServer{clients: map[chan string]struct{}{}, last: map[string]string{}}
+	s := &NMEAServer{clients: map[chan string]struct{}{}}
 	var err error
 	if p, ok := strings.CutPrefix(addr, "unix:"); ok {
 		if s.ln, err = listenUnix(p); err != nil {
@@ -106,10 +105,20 @@ func (s *NMEAServer) drop(ch chan string) {
 	}
 }
 
-// pass reports whether sentence is sent on. GGA and RMC pass once per time
-// field (hhmmss, so once per UTC second), VTG, which has no time, only after
-// the GGA that passed with it, and anything else (GSV) always.
-func (s *NMEAServer) pass(sentence string) bool {
+// Thin keeps one position set per UTC second of a stream of sentences, the
+// module's ~10 Hz being the same position with the same whole-second time.
+// GGA and RMC pass once per time field (hhmmss); what rides with a position
+// set, VTG and GST once and every GSA, passes only after the GGA that passed;
+// anything else (GSV) always.
+type Thin struct {
+	last map[string]string // sentence type -> time field last passed
+	ride bool
+	vtg  bool
+	gst  bool
+}
+
+// Pass reports whether sentence goes on.
+func (t *Thin) Pass(sentence string) bool {
 	if len(sentence) < 7 || sentence[0] != '$' {
 		return true
 	}
@@ -118,19 +127,44 @@ func (s *NMEAServer) pass(sentence string) bool {
 	case "GGA", "RMC":
 		f, _, _ := strings.Cut(sentence[7:], ",")
 		f, _, _ = strings.Cut(f, ".")
-		if s.last[typ] == f {
+		if t.last == nil {
+			t.last = map[string]string{}
+		}
+		if t.last[typ] == f {
+			if typ == "GGA" {
+				t.ride, t.vtg, t.gst = false, false, false
+			}
 			return false
 		}
-		s.last[typ] = f
+		t.last[typ] = f
 		if typ == "GGA" {
-			s.vtg = true
+			t.ride, t.vtg, t.gst = true, true, true
 		}
 	case "VTG":
-		ok := s.vtg
-		s.vtg = false
+		ok := t.vtg
+		t.vtg = false
 		return ok
+	case "GST":
+		ok := t.gst
+		t.gst = false
+		return ok
+	case "GSA":
+		return t.ride
 	}
 	return true
+}
+
+// ThinWriter is w, thinned: each Write is one sentence.
+type ThinWriter struct {
+	W io.Writer
+	t Thin
+}
+
+func (w *ThinWriter) Write(p []byte) (int, error) {
+	if !w.t.Pass(string(p)) {
+		return len(p), nil
+	}
+	return w.W.Write(p)
 }
 
 // Write sends sentence to every client, without waiting for any.
@@ -138,7 +172,7 @@ func (s *NMEAServer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sentence := string(p)
-	if !s.pass(sentence) {
+	if !s.thin.Pass(sentence) {
 		return len(p), nil
 	}
 	for ch := range s.clients {

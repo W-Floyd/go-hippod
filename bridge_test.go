@@ -149,3 +149,42 @@ func TestConverterGSV(t *testing.T) {
 		t.Errorf("empty GSV %q", out)
 	}
 }
+
+func TestConverterExtra(t *testing.T) {
+	ids := []byte{IDExt, 0x24, 0, 14, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 211, 131}
+	ext := make([]byte, 0x58)
+	ext[0], ext[1] = IDExt, 0x22
+	for _, tc := range []struct {
+		name   string
+		bodies [][]byte
+		gsa    []string
+		mode   string
+	}{
+		{"3D, 14 ids over two GSA", [][]byte{utcBody(9), ext, ids, fixBody(FixValid)},
+			[]string{"GNGSA,A,3,1,2,3,4,5,6,7,8,9,10,11,12,0.0,1.5,0.0", "GNGSA,A,3,211,131,,,,,,,,,,,0.0,1.5,0.0"}, "3"},
+		{"2D without altitude", [][]byte{utcBody(9), fixBody(FixValid)},
+			[]string{"GNGSA,A,2,,,,,,,,,,,,,0.0,1.5,0.0"}, "2"},
+		{"no fix", [][]byte{utcBody(9), ids},
+			[]string{"GNGSA,A,1,,,,,,,,,,,,,0.0,1.5,0.0"}, "1"},
+	} {
+		c := Converter{Extra: true}
+		out := feed(&c, append(tc.bodies, packRawDR(48.1173, 11.516666666, 0x4000, 1000, 0x00))...)
+		var gsa []string
+		for _, s := range out {
+			checkSentence(t, s)
+			if strings.HasPrefix(s, "$GNGSA") {
+				gsa = append(gsa, strings.Join(strings.Split(s[1:], "*")[:1], ""))
+			}
+		}
+		if strings.Join(gsa, "|") != strings.Join(tc.gsa, "|") {
+			t.Errorf("%s: GSA %q, want %q", tc.name, gsa, tc.gsa)
+		}
+		if st := pick(out, "GPGST"); st == nil || st[2] != "15.0" || st[8] != "0.0" || st[1] != "090507.00" {
+			t.Errorf("%s: GST %v", tc.name, st)
+		}
+	}
+	var c Converter
+	if out := feed(&c, utcBody(9), fixBody(FixValid), packRawDR(1, 2, 0, 0, 0)); len(out) != 6 {
+		t.Errorf("without Extra: %q", out)
+	}
+}

@@ -18,6 +18,9 @@ func TestNMEAServerPass(t *testing.T) {
 		return Sentence("GPRMC," + hms + ".00,A,4807.038,N,01131.000,E,0.0,0.0,181026,,,A")
 	}
 	vtg := Sentence("GPVTG,0.0,T,,M,0.0,N,0.0,K,A")
+	gsa := Sentence("GNGSA,A,3,1,2,,,,,,,,,,,1.5,1.5,1.5")
+	gst := func(hms string) string { return Sentence("GPGST," + hms + ".00,3.0,3.0,3.0,0.0,3.0,3.0,1.0") }
+	full := func(hms string) []string { return []string{gga(hms), rmc(hms), vtg, gsa, gsa, gst(hms)} }
 	gsv := Sentence("GPGSV,1,1,01,1,2,3,4")
 	set := func(hms string) []string { return []string{gga(hms), rmc(hms), vtg} }
 	cat := func(ss ...[]string) (all []string) {
@@ -32,16 +35,18 @@ func TestNMEAServerPass(t *testing.T) {
 	}{
 		{"one set", set("090507"), set("090507")},
 		{"ten per second", cat(set("090507"), set("090507"), set("090507"), set("090508"), set("090508")), cat(set("090507"), set("090508"))},
+		{"gpsd set", cat(full("090507"), full("090507"), full("090508")), cat(full("090507"), full("090508"))},
+		{"gsa and gst need their gga", []string{gsa, gst("090507")}, nil},
 		{"gsv always", []string{gsv, gsv, gsv}, []string{gsv, gsv, gsv}},
 		{"stray vtg before any gga", []string{vtg}, nil},
 		{"gga and rmc alone", []string{gga("090507"), gga("090507"), rmc("090507"), rmc("090507")}, []string{gga("090507"), rmc("090507")}},
 		{"midnight rollover", cat(set("235959"), set("000000")), cat(set("235959"), set("000000"))},
 		{"not a sentence", []string{"junk", ""}, []string{"junk", ""}},
 	} {
-		s := &NMEAServer{last: map[string]string{}}
+		var s Thin
 		var got []string
 		for _, x := range tc.in {
-			if s.pass(x) {
+			if s.Pass(x) {
 				got = append(got, x)
 			}
 		}
@@ -210,5 +215,16 @@ func TestNMEAServerSlowClient(t *testing.T) {
 func TestNMEAServerBadAddr(t *testing.T) {
 	if _, err := ListenNMEA("not an address"); err == nil {
 		t.Error("no error for a bad address")
+	}
+}
+
+func TestThinWriter(t *testing.T) {
+	var b syncBuf
+	w := &ThinWriter{W: &b}
+	for range 3 {
+		io.WriteString(w, Sentence("GPGGA,090507.00,4807.038,N,01131.000,E,1,08,0.9,545.4,M,,M,,"))
+	}
+	if n := strings.Count(b.String(), "$GPGGA"); n != 1 {
+		t.Errorf("%d GGA, want 1", n)
 	}
 }

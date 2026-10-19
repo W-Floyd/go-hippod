@@ -22,6 +22,8 @@ type RunConfig struct {
 	Wait time.Duration
 	// AltFromDR is Converter.AltFromDR.
 	AltFromDR bool
+	// Extra is Converter.Extra.
+	Extra bool
 	// Logf reports sent frames and the final counters; nil for none.
 	Logf func(format string, args ...any)
 }
@@ -49,7 +51,7 @@ func Run(ctx context.Context, port io.ReadWriter, cfg RunConfig) (Stats, error) 
 	}
 	var st Stats
 	var dec Decoder
-	conv := &Converter{AltFromDR: cfg.AltFromDR}
+	conv := &Converter{AltFromDR: cfg.AltFromDR, Extra: cfg.Extra}
 
 	type chunk struct {
 		b   []byte

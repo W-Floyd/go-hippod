@@ -12,6 +12,10 @@ type Converter struct {
 	// measured to read about 170 m high, so it is off by default.
 	AltFromDR bool
 
+	// Extra also emits $GPGSA and $GPGST after each position set, which gpsd
+	// uses for the fix mode, the DOPs, the used satellites and the errors.
+	Extra bool
+
 	utc   *UTC
 	raw   *RawDR
 	fix   *GPSFix
@@ -91,7 +95,7 @@ func (c *Converter) position() []string {
 	case c.AltFromDR && bit(r.Flags2, 1):
 		g.HasAlt, g.AltMSL = true, float64(r.Alt)
 	}
-	return []string{
+	out := []string{
 		GGA(g),
 		RMC(RMCData{
 			Hour: int(u.Hour), Min: int(u.Min), Sec: int(u.Sec),
@@ -101,6 +105,23 @@ func (c *Converter) position() []string {
 		}),
 		VTG(r.Bearing, r.Knots(), c.mode()),
 	}
+	if c.Extra {
+		mode := 1
+		switch {
+		case !has:
+		case g.HasAlt:
+			mode = 3
+		default:
+			mode = 2
+		}
+		var ids []byte
+		if has && c.used != nil {
+			ids = c.used.IDs
+		}
+		out = append(out, GSA(GSAData{Mode: mode, IDs: ids, PDOP: u.PDOP, HDOP: u.HDOP, VDOP: u.VDOP})...)
+		out = append(out, GST(GSTData{Hour: g.Hour, Min: g.Min, Sec: g.Sec, Pos: float64(r.PosAccuracy), Alt: float64(r.AltAccuracy)}))
+	}
+	return out
 }
 
 func (c *Converter) gsv() []string {

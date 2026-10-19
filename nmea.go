@@ -111,6 +111,52 @@ func VTG(course, knots float64, mode byte) string {
 	return Sentence(fmt.Sprintf("GPVTG,%.1f,T,,M,%.1f,N,%.1f,K,%c", course, knots, knots*1.852, mode))
 }
 
+// GSAData is what $GPGSA needs.
+type GSAData struct {
+	Mode             int // 1 no fix, 2 2D, 3 3D
+	IDs              []byte
+	PDOP, HDOP, VDOP float64
+}
+
+// GSA is the $GNGSA sentences for g: automatic selection, the fix mode, twelve
+// satellite ids to a sentence (as many sentences as ids need, at least one) and
+// the three DOPs, repeated in each. Not in the HAL.
+func GSA(g GSAData) []string {
+	n := (len(g.IDs) + 11) / 12
+	if n == 0 {
+		n = 1
+	}
+	out := make([]string, n)
+	for k := range out {
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "GNGSA,A,%d", g.Mode)
+		for i := 12 * k; i < 12*(k+1); i++ {
+			if i < len(g.IDs) {
+				fmt.Fprintf(&sb, ",%d", g.IDs[i])
+			} else {
+				sb.WriteByte(',')
+			}
+		}
+		fmt.Fprintf(&sb, ",%.1f,%.1f,%.1f", g.PDOP, g.HDOP, g.VDOP)
+		out[k] = Sentence(sb.String())
+	}
+	return out
+}
+
+// GSTData is what $GPGST needs: one-sigma errors in metres.
+type GSTData struct {
+	Hour, Min, Sec int
+	Pos, Alt       float64
+}
+
+// GST is the $GPGST sentence (not in the HAL): the module's position accuracy
+// as a circular error (rms, both semi-axes and the latitude and longitude
+// sigmas), its altitude accuracy as the altitude sigma.
+func GST(g GSTData) string {
+	return Sentence(fmt.Sprintf("GPGST,%02d%02d%02d.00,%.1f,%.1f,%.1f,0.0,%.1f,%.1f,%.1f",
+		g.Hour, g.Min, g.Sec, g.Pos, g.Pos, g.Pos, g.Pos, g.Pos, g.Alt))
+}
+
 // SatView is one satellite of a GSV sentence.
 type SatView struct {
 	PRN, Elev, Az, SNR int

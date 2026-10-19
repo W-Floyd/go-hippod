@@ -29,6 +29,10 @@ import (
 // owns the UART: hippod -attach SOCKET prints them, one line each with the
 // time, until it is stopped.
 //
+// -gpsd adds $GPGSA (fix mode, used satellites, DOPs) and $GPGST (accuracy) to
+// the output and thins -out to one GGA/RMC/VTG/GSA/GST set per UTC second, which
+// is what gpsd wants; without it -out is as it always was.
+//
 // -nmea-tcp ADDR serves the same NMEA to any number of clients on a TCP
 // host:port (or unix:PATH), thinned to one GGA/RMC/VTG set per UTC second, which
 // is what GeoClue's network-nmea source wants; -out is unchanged.
@@ -48,6 +52,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	wait := fs.Duration("wait", 3*time.Second, "how long -query listens for replies")
 	altDR := fs.Bool("alt-dr", false, "take the GGA altitude from the DR message when the module sends no 0x70/0x22 (a guess)")
 	tapPath := fs.String("tap", "", "serve every frame with its decoded fields, with the time, on this unix socket, for -attach (not with -query)")
+	gpsd := fs.Bool("gpsd", false, "better for gpsd: add $GPGSA and $GPGST, and write one position set per UTC second to -out")
 	nmeaNet := fs.String("nmea-tcp", "", "also serve the NMEA, one position set per UTC second, on this TCP host:port or unix:PATH, for GeoClue (not with -query)")
 	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
 	if err := fs.Parse(args); err != nil {
@@ -69,7 +74,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	lg := log.New(stderr, "", log.LstdFlags)
 
-	cfg := RunConfig{AltFromDR: *altDR, Logf: lg.Printf}
+	cfg := RunConfig{AltFromDR: *altDR, Extra: *gpsd, Logf: lg.Printf}
 	if *dump {
 		cfg.Dump = stdout
 		if *out == "-" {
@@ -104,6 +109,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		}
 		defer closeOut()
 		cfg.Out = w
+		if *gpsd {
+			cfg.Out = &ThinWriter{W: w}
+		}
 		if *nmeaNet != "" {
 			srv, err := ListenNMEA(*nmeaNet)
 			if err != nil {
@@ -111,7 +119,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 			defer srv.Close()
-			cfg.Out = teeWriter{w, srv}
+			cfg.Out = teeWriter{cfg.Out, srv}
 		}
 	}
 	if *replay {
