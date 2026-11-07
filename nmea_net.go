@@ -201,11 +201,14 @@ func (s *NMEAServer) Close() {
 	}
 }
 
-// teeWriter writes to both, so that a failing a does not stop b.
-type teeWriter struct{ a, b io.Writer }
+// teeWriter writes to every writer, so that a failing one does not stop the
+// rest; the first one's result is the result.
+type teeWriter []io.Writer
 
 func (t teeWriter) Write(p []byte) (int, error) {
-	n, err := t.a.Write(p)
-	t.b.Write(p)
+	n, err := t[0].Write(p)
+	for _, w := range t[1:] {
+		w.Write(p)
+	}
 	return n, err
 }

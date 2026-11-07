@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -17,7 +19,7 @@ import (
 // writes NMEA. args are os.Args[1:]. It returns the exit code and writes only
 // to the writers it is given, so a larger program can embed it.
 //
-//	hippod -dev /dev/ttyAMA3 [-baud 115200] [-out PATH|-|file:PATH] [-dump] [-query] [-replay-stock]
+//	hippod -dev /dev/ttyAMA3 [-baud 115200] [-out PATH|-|file:PATH]... [-dump] [-query] [-replay-stock]
 //
 // By default it only reads. -query sends the four plain queries (version,
 // output protocol mask, constellation, DR rate) once, prints what comes back
@@ -39,13 +41,15 @@ import (
 //
 // -out "-" is stdout (and then -dump goes to stderr); a path on Linux becomes
 // a pty whose slave end gpsd can open (the path is a symlink to it); file:PATH
-// appends to a file.
+// appends to a file. -out repeats: every one gets the same NMEA, so gpsd and
+// another reader of a serial device each get a pty of their own.
 func Main(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hippod", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dev := fs.String("dev", "", "the GNSS module's serial device (the vendor's /dev/ttyTCC3, a PL011 at 0x16630000; /dev/ttyAMA3 on mainline)")
 	baud := fs.Int("baud", 115200, "baud rate; the stock HAL opens the port at 115200")
-	out := fs.String("out", "-", `where NMEA goes: "-" for stdout, file:PATH to append to a file, else a pty symlink at PATH (Linux)`)
+	var outs outList
+	fs.Var(&outs, "out", `where NMEA goes, repeatable: "-" for stdout (the default), file:PATH to append to a file, else a pty symlink at PATH (Linux)`)
 	dump := fs.Bool("dump", false, "print every frame with its decoded fields")
 	query := fs.Bool("query", false, "send the four safe query frames once, print the replies for -wait, and exit")
 	replay := fs.Bool("replay-stock", false, "send the two set frames the stock HAL sends (NMEA control, protocol mask 3); changes the module")
@@ -73,11 +77,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	lg := log.New(stderr, "", log.LstdFlags)
+	if len(outs) == 0 {
+		outs = outList{"-"}
+	}
 
 	cfg := RunConfig{AltFromDR: *altDR, Extra: *gpsd, Logf: lg.Printf}
 	if *dump {
 		cfg.Dump = stdout
-		if *out == "-" {
+		if slices.Contains(outs, "-") {
 			cfg.Dump = stderr
 		}
 	}
@@ -102,15 +109,19 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			cfg.Dump = stdout
 		}
 	} else {
-		w, closeOut, err := openOut(*out, stdout)
-		if err != nil {
-			lg.Print(err)
-			return 1
+		var ws teeWriter
+		for _, spec := range outs {
+			w, closeOut, err := openOut(spec, stdout)
+			if err != nil {
+				lg.Print(err)
+				return 1
+			}
+			defer closeOut()
+			ws = append(ws, w)
 		}
-		defer closeOut()
-		cfg.Out = w
+		cfg.Out = ws
 		if *gpsd {
-			cfg.Out = &ThinWriter{W: w}
+			cfg.Out = &ThinWriter{W: ws}
 		}
 		if *nmeaNet != "" {
 			srv, err := ListenNMEA(*nmeaNet)
@@ -140,6 +151,16 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// outList is a repeatable -out.
+type outList []string
+
+func (o *outList) String() string { return strings.Join(*o, ",") }
+
+func (o *outList) Set(v string) error {
+	*o = append(*o, v)
+	return nil
 }
 
 func openOut(spec string, stdout io.Writer) (io.Writer, func(), error) {

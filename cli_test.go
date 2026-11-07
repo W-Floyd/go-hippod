@@ -11,6 +11,7 @@ import (
 )
 
 func TestMainUsage(t *testing.T) {
+	dir := t.TempDir()
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -20,6 +21,8 @@ func TestMainUsage(t *testing.T) {
 		{"no device", nil, 2, "-dev"},
 		{"unknown flag", []string{"-nope"}, 2, "flag provided but not defined"},
 		{"help", []string{"-h"}, 0, "-replay-stock"},
+		// every -out is opened, not only the last
+		{"first of two -out", []string{"-dev", "/dev/does-not-exist", "-out", "file:" + dir + "/no/a", "-out", "file:" + dir + "/b"}, 1, dir + "/no/a"},
 	} {
 		var out, errb bytes.Buffer
 		if code := Main(tc.args, &out, &errb); code != tc.code {
