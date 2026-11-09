@@ -82,6 +82,7 @@ type RMCData struct {
 	HasPos           bool
 	Lat, Lon         float64
 	Knots, Course    float64
+	NoCourse         bool // the course field empty: the heading is not valid
 	Mode             byte
 }
 
@@ -102,13 +103,22 @@ func RMC(r RMCData) string {
 	} else {
 		sb.WriteString(",,,,")
 	}
-	fmt.Fprintf(&sb, "%.1f,%.1f,%02d%02d%02d,,,%c", r.Knots, r.Course, r.Day, r.Month, r.Year%100, r.Mode)
+	fmt.Fprintf(&sb, "%.1f,%s,%02d%02d%02d,,,%c", r.Knots, courseField(r.Course, r.NoCourse), r.Day, r.Month, r.Year%100, r.Mode)
 	return Sentence(sb.String())
 }
 
+func courseField(course float64, none bool) string {
+	if none {
+		return ""
+	}
+	return fmt.Sprintf("%.1f", course)
+}
+
 // VTG is the $GPVTG sentence (not in the HAL; the same speed and course).
-func VTG(course, knots float64, mode byte) string {
-	return Sentence(fmt.Sprintf("GPVTG,%.1f,T,,M,%.1f,N,%.1f,K,%c", course, knots, knots*1.852, mode))
+func VTG(course, knots float64, mode byte) string { return vtg(course, false, knots, mode) }
+
+func vtg(course float64, noCourse bool, knots float64, mode byte) string {
+	return Sentence(fmt.Sprintf("GPVTG,%s,T,,M,%.1f,N,%.1f,K,%c", courseField(course, noCourse), knots, knots*1.852, mode))
 }
 
 // GSAData is what $GPGSA needs.

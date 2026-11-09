@@ -36,7 +36,8 @@ func TestTapSpeed(t *testing.T) {
 
 // While fresh and with a fix, the car's speed is the speed of $GPRMC (knots)
 // and $GPVTG (knots and km/h); the other sentences, and every sentence when it
-// is stale, absent or without a fix, are the module's.
+// is stale, absent or without a fix, are the module's. The course is always
+// the DR bearing, or with CourseStatus empty while the heading status is clear.
 func TestConverterCarSpeed(t *testing.T) {
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -44,17 +45,23 @@ func TestConverterCarSpeed(t *testing.T) {
 		fix      byte    // the module's fix status, 0 for none
 		kmh      float64 // the car's, -1 for none
 		age      time.Duration
+		status   bool   // CourseStatus
+		flags2   byte   // the DR flags; 0xfe has the heading status bit
 		rmc      string // RMC speed field
 		vtgKnots string
 		vtgKmh   string
+		course   string // RMC and VTG
 		logged   string
 	}{
-		{"car speed", FixValid, 100, time.Second, "54.0", "54.0", "100.0", "the car's"},
-		{"car stopped", FixValid, 0, 0, "0.0", "0.0", "0.0", "the car's"},
-		{"67 mph", FixValid, 107.826048, 0, "58.2", "58.2", "107.8", "the car's"},
-		{"stale", FixValid, 100, 3 * time.Second, "19.4", "19.4", "36.0", ""},
-		{"absent", FixValid, -1, 0, "19.4", "19.4", "36.0", ""},
-		{"no fix", 0, 100, 0, "19.4", "19.4", "36.0", ""},
+		{"car speed", FixValid, 100, time.Second, false, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
+		{"car stopped", FixValid, 0, 0, false, 0xfe, "0.0", "0.0", "0.0", "90.0", "the car's"},
+		{"67 mph", FixValid, 107.826048, 0, false, 0xfe, "58.2", "58.2", "107.8", "90.0", "the car's"},
+		{"stale", FixValid, 100, 3 * time.Second, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"absent", FixValid, -1, 0, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"no fix", 0, 100, 0, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"heading status ignored", FixValid, -1, 0, false, 0xfa, "19.4", "19.4", "36.0", "90.0", ""},
+		{"heading status set", FixValid, 100, 0, true, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
+		{"heading status clear", FixValid, 100, 0, true, 0xfa, "54.0", "54.0", "100.0", "", "the car's"},
 	} {
 		var logs []string
 		cs := &CarSpeed{MaxAge: 2 * time.Second, Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
@@ -63,8 +70,10 @@ func TestConverterCarSpeed(t *testing.T) {
 			cs.Set(tc.kmh)
 		}
 		cs.now = func() time.Time { return now }
-		c := Converter{Speed: cs}
-		out := feed(&c, utcBody(9), fixBody(tc.fix), packRawDR(48.1173, 11.516666666, 0x4000, 1000, 0))
+		c := Converter{Speed: cs, CourseStatus: tc.status}
+		raw := packRawDR(48.1173, 11.516666666, 0x4000, 1000, 0)
+		raw[2] = tc.flags2
+		out := feed(&c, utcBody(9), fixBody(tc.fix), raw)
 		for _, s := range out {
 			checkSentence(t, s)
 		}
@@ -72,7 +81,7 @@ func TestConverterCarSpeed(t *testing.T) {
 		if rmc == nil || vtg == nil {
 			t.Fatalf("%s: %q", tc.name, out)
 		}
-		if rmc[7] != tc.rmc || rmc[8] != "90.0" || vtg[5] != tc.vtgKnots || vtg[7] != tc.vtgKmh || vtg[1] != "90.0" {
+		if rmc[7] != tc.rmc || rmc[8] != tc.course || vtg[5] != tc.vtgKnots || vtg[7] != tc.vtgKmh || vtg[1] != tc.course {
 			t.Errorf("%s: RMC %v VTG %v", tc.name, rmc, vtg)
 		}
 		if got := strings.Join(logs, "|"); !strings.Contains(got, tc.logged) || tc.logged == "" && got != "" {

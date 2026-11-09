@@ -20,6 +20,13 @@ type Converter struct {
 	// module's, the only sentences that carry one; never without a fix.
 	Speed *CarSpeed
 
+	// CourseStatus leaves the course of $GPRMC and $GPVTG empty while the DR
+	// solution's heading status (0x30 Flags2 bit 2) is clear, so a reader
+	// sees no track rather than a heading the module does not vouch for.
+	// Which way the bit reads on the unit is not captured yet: off by
+	// default, the DR bearing always goes out, as from the HAL.
+	CourseStatus bool
+
 	utc   *UTC
 	raw   *RawDR
 	fix   *GPSFix
@@ -99,6 +106,7 @@ func (c *Converter) position() []string {
 	case c.AltFromDR && bit(r.Flags2, 1):
 		g.HasAlt, g.AltMSL = true, float64(r.Alt)
 	}
+	noCourse := c.CourseStatus && !bit(r.Flags2, 2)
 	knots := r.Knots()
 	if has {
 		if k, ok := c.Speed.Knots(); ok {
@@ -111,9 +119,9 @@ func (c *Converter) position() []string {
 			Hour: int(u.Hour), Min: int(u.Min), Sec: int(u.Sec),
 			Day: int(u.Day), Month: int(u.Month), Year: int(u.Year),
 			Valid: has, HasPos: has, Lat: r.Lat, Lon: r.Lon,
-			Knots: knots, Course: r.Bearing, Mode: c.mode(),
+			Knots: knots, Course: r.Bearing, NoCourse: noCourse, Mode: c.mode(),
 		}),
-		VTG(r.Bearing, knots, c.mode()),
+		vtg(r.Bearing, noCourse, knots, c.mode()),
 	}
 	if c.Extra {
 		mode := 1

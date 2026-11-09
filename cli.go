@@ -64,6 +64,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	nmeaNet := fs.String("nmea-tcp", "", "also serve the NMEA, one position set per UTC second, on this TCP host:port or unix:PATH, for GeoClue (not with -query)")
 	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
 	speedTap := fs.String("speed-tap", "", "micomd's -tap socket: put the car's own speed in $GPRMC and $GPVTG while it is fresh (not with -query)")
+	courseStatus := fs.Bool("course-status", false, "leave the RMC/VTG course empty while the DR heading status (0x30 flags2 bit 2) is clear; check -dump first that the bit is set when the heading is good")
 	speedAge := fs.Duration("speed-max-age", 2*time.Second, "how long a -speed-tap reading stays fresh; the module's speed is used after that")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -87,7 +88,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		outs = outList{"-"}
 	}
 
-	cfg := RunConfig{AltFromDR: *altDR, Extra: *gpsd, Logf: lg.Printf}
+	cfg := RunConfig{AltFromDR: *altDR, Extra: *gpsd, CourseStatus: *courseStatus, Logf: lg.Printf}
 	if *dump {
 		cfg.Dump = stdout
 		if slices.Contains(outs, "-") {

@@ -127,6 +127,12 @@ old; otherwise the module's speed goes out unchanged. Course, position and fix
 are always the module's. The tap is read on its own goroutine and reconnected
 with backoff, so micomd need not run; each change of source is logged once.
 
+The course is the DR bearing, gyro-held, so it stays valid when slow or
+stopped. Its validity (0x30 flags2 bit 2, "heading status") reaches no NMEA
+field; `-course-status` leaves the RMC/VTG course empty while that bit is
+clear, so gpsd reports no track then. Off by default: how the bit behaves on
+the unit is not captured yet, so check it with `-dump` first.
+
 ## What is known
 
 Every layout below was read from a disassembly of the HAL, never from a capture
