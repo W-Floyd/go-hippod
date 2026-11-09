@@ -34,42 +34,50 @@ func TestTapSpeed(t *testing.T) {
 	}
 }
 
-// While fresh and with a fix, the car's speed is the speed of $GPRMC (knots)
-// and $GPVTG (knots and km/h); the other sentences, and every sentence when it
-// is stale, absent or without a fix, are the module's. The course is always
-// the DR bearing, or with CourseStatus empty while the heading status is clear.
+// While the car's speed stands and the module has a fix, it is the speed of
+// $GPRMC (knots) and $GPVTG (knots and km/h); the other sentences, and every
+// sentence when it does not, are the module's. It stands while micomd's tap
+// is connected and talking, a steady speed (no new speed frame, as the micom
+// sends one only on change) included, up to MaxAge. The course is always the
+// DR bearing, or with CourseStatus empty while the heading status is clear.
 func TestConverterCarSpeed(t *testing.T) {
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	const s = time.Second
 	for _, tc := range []struct {
-		name     string
-		fix      byte    // the module's fix status, 0 for none
-		kmh      float64 // the car's, -1 for none
-		age      time.Duration
-		status   bool   // CourseStatus
-		flags2   byte   // the DR flags; 0xfe has the heading status bit
-		rmc      string // RMC speed field
-		vtgKnots string
-		vtgKmh   string
-		course   string // RMC and VTG
-		logged   string
+		name      string
+		fix       byte    // the module's fix status, 0 for none
+		kmh       float64 // the car's last reading, -1 for none
+		speedAge  time.Duration
+		lineAge   time.Duration // since the last tap line of any kind
+		connected bool
+		status    bool   // CourseStatus
+		flags2    byte   // the DR flags; 0xfe has the heading status bit
+		rmc       string // RMC speed field
+		vtgKnots  string
+		vtgKmh    string
+		course    string // RMC and VTG
+		logged    string
 	}{
-		{"car speed", FixValid, 100, time.Second, false, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
-		{"car stopped", FixValid, 0, 0, false, 0xfe, "0.0", "0.0", "0.0", "90.0", "the car's"},
-		{"67 mph", FixValid, 107.826048, 0, false, 0xfe, "58.2", "58.2", "107.8", "90.0", "the car's"},
-		{"stale", FixValid, 100, 3 * time.Second, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
-		{"absent", FixValid, -1, 0, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
-		{"no fix", 0, 100, 0, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
-		{"heading status ignored", FixValid, -1, 0, false, 0xfa, "19.4", "19.4", "36.0", "90.0", ""},
-		{"heading status set", FixValid, 100, 0, true, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
-		{"heading status clear", FixValid, 100, 0, true, 0xfa, "54.0", "54.0", "100.0", "", "the car's"},
+		{"car speed", FixValid, 100, s, s, true, false, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
+		{"car stopped", FixValid, 0, 0, 0, true, false, 0xfe, "0.0", "0.0", "0.0", "90.0", "the car's"},
+		{"67 mph", FixValid, 107.826048, 0, 0, true, false, 0xfe, "58.2", "58.2", "107.8", "90.0", "the car's"},
+		{"steady: no speed frame for 20 s, other frames arriving", FixValid, 100, 20 * s, s / 2, true, false, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
+		{"no speed frame for 40 s", FixValid, 100, 40 * s, s / 2, true, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"tap quiet: micomd's link down", FixValid, 100, 5 * s, 5 * s, true, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"tap disconnected", FixValid, 100, s, s, false, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"absent", FixValid, -1, 0, 0, true, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"no fix", 0, 100, 0, 0, true, false, 0xfe, "19.4", "19.4", "36.0", "90.0", ""},
+		{"heading status ignored", FixValid, -1, 0, 0, true, false, 0xfa, "19.4", "19.4", "36.0", "90.0", ""},
+		{"heading status set", FixValid, 100, 0, 0, true, true, 0xfe, "54.0", "54.0", "100.0", "90.0", "the car's"},
+		{"heading status clear", FixValid, 100, 0, 0, true, true, 0xfa, "54.0", "54.0", "100.0", "", "the car's"},
 	} {
 		var logs []string
-		cs := &CarSpeed{MaxAge: 2 * time.Second, Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
-		cs.now = func() time.Time { return now.Add(-tc.age) }
+		cs := &CarSpeed{MaxAge: 30 * s, LinkAge: 3 * s, now: func() time.Time { return now },
+			Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
+		cs.connected, cs.lineAt = tc.connected, now.Add(-tc.lineAge)
 		if tc.kmh >= 0 {
-			cs.Set(tc.kmh)
+			cs.kmh, cs.at = tc.kmh, now.Add(-tc.speedAge)
 		}
-		cs.now = func() time.Time { return now }
 		c := Converter{Speed: cs, CourseStatus: tc.status}
 		raw := packRawDR(48.1173, 11.516666666, 0x4000, 1000, 0)
 		raw[2] = tc.flags2
@@ -94,7 +102,7 @@ func TestConverterCarSpeed(t *testing.T) {
 func TestCarSpeedLogsTheSwitch(t *testing.T) {
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	var logs []string
-	cs := &CarSpeed{MaxAge: 2 * time.Second, now: func() time.Time { return now },
+	cs := &CarSpeed{MaxAge: 30 * time.Second, LinkAge: 3 * time.Second, now: func() time.Time { return now },
 		Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
 	cs.Set(50)
 	for range 3 {
@@ -109,7 +117,8 @@ func TestCarSpeedLogsTheSwitch(t *testing.T) {
 	}
 }
 
-// The tap is followed into CarSpeed, and across micomd restarts.
+// The tap is followed into CarSpeed, across micomd restarts; the reading
+// stands while the tap talks and drops when it disconnects.
 func TestFollowSpeedTap(t *testing.T) {
 	dir, err := os.MkdirTemp("", "tap")
 	if err != nil {
@@ -122,23 +131,37 @@ func TestFollowSpeedTap(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	cs := &CarSpeed{MaxAge: time.Minute}
+	cs := &CarSpeed{MaxAge: time.Minute, LinkAge: time.Minute}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go FollowSpeedTap(ctx, p, cs, t.Logf)
-	for _, payload := range []string{"0086", "0050"} {
-		c, err := ln.Accept()
-		if err != nil {
-			t.Fatal(err)
+	state := func() string {
+		k, ok := cs.Knots()
+		return fmt.Sprintf("%.1f %v", k*1.852, ok)
+	}
+	waitFor := func(want string) {
+		t.Helper()
+		for i := 0; i < 300 && state() != want; i++ {
+			time.Sleep(10 * time.Millisecond)
 		}
-		fmt.Fprintf(c, "15:04:05.000 rx hdr=44c100c4 cmd=20 payload=%s\n", payload)
-		c.Close()
+		if got := state(); got != want {
+			t.Errorf("%s, want %s", got, want)
+		}
 	}
-	kmh := func() string { k, _ := cs.Knots(); return fmt.Sprintf("%.1f", k*1.852) }
-	for i := 0; i < 200 && kmh() != "64.4"; i++ { // 0x50 = 40 mph
-		time.Sleep(10 * time.Millisecond)
+	c, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := kmh(); got != "64.4" {
-		t.Errorf("%s km/h", got)
+	fmt.Fprintln(c, "15:04:05.000 rx hdr=44c100c4 cmd=20 payload=0086")
+	waitFor("107.8 true")
+	c.Close()
+	waitFor("107.8 false")
+	if c, err = ln.Accept(); err != nil {
+		t.Fatal(err)
 	}
+	defer c.Close()
+	fmt.Fprintln(c, "15:04:05.000 rx hdr=018a0181 cmd=0f payload=00")
+	waitFor("107.8 false") // talking, but the reading went with the old connection
+	fmt.Fprintln(c, "15:04:05.000 rx hdr=44c100c4 cmd=20 payload=0050")
+	waitFor("64.4 true") // 0x50 = 40 mph
 }

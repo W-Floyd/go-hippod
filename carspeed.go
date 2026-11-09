@@ -14,41 +14,65 @@ import (
 
 // CarSpeed is the car's own speed, as micomd decodes it from the micom, for
 // the NMEA in place of the module's: Android Auto and Maps then show the
-// speedometer's speed. It is used only while fresh; a stale or absent one
-// leaves the module's.
+// speedometer's speed. The micom sends the speed frame only on change, so a
+// steady speed goes unrepeated: the last reading stands while the tap is
+// connected and micomd's link is alive (any tap line within LinkAge), up to
+// MaxAge after it arrived. Otherwise the module's speed stays.
 type CarSpeed struct {
-	// MaxAge is how long a reading stays fresh.
+	// LinkAge is how long the tap may be silent; the micom's routine frames
+	// (its CPU-alive requests, the answers to micomd's 1 s poll) keep it
+	// talking while the link is up.
+	LinkAge time.Duration
+	// MaxAge is how long a reading stands without a new one.
 	MaxAge time.Duration
 	// Logf hears when the car's speed takes over and when it falls back.
 	Logf func(format string, args ...any)
 	now  func() time.Time
 
-	mu    sync.Mutex
-	kmh   float64
-	at    time.Time
-	using bool
+	mu        sync.Mutex
+	kmh       float64
+	at        time.Time // the last reading
+	lineAt    time.Time // the last tap line of any kind
+	connected bool
+	using     bool
 }
 
-// Set records a reading in km/h, taken now.
+// Set records a reading in km/h, taken now, off a connected tap.
 func (c *CarSpeed) Set(kmh float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.kmh, c.at = kmh, c.clock()
+	c.kmh, c.at, c.lineAt, c.connected = kmh, c.clock(), c.clock(), true
 }
 
-// Knots is the car's speed in knots while fresh. It logs a change of source.
+// Line records a tap line that carries no speed: the link is alive.
+func (c *CarSpeed) Line() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lineAt, c.connected = c.clock(), true
+}
+
+// Disconnected drops the reading: the tap is gone.
+func (c *CarSpeed) Disconnected() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.connected, c.at = false, time.Time{}
+}
+
+// Knots is the car's speed in knots while it stands. It logs a change of
+// source.
 func (c *CarSpeed) Knots() (float64, bool) {
 	if c == nil {
 		return 0, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	fresh := !c.at.IsZero() && c.clock().Sub(c.at) <= c.MaxAge
+	now := c.clock()
+	fresh := c.connected && !c.at.IsZero() && now.Sub(c.lineAt) <= c.LinkAge && now.Sub(c.at) <= c.MaxAge
 	if fresh != c.using && c.Logf != nil {
 		if fresh {
 			c.Logf("speed: the car's, from micomd")
 		} else {
-			c.Logf("speed: the GNSS module's (no fresh car speed for %v)", c.MaxAge)
+			c.Logf("speed: the GNSS module's (micomd's tap down or quiet, or no car speed for %v)", c.MaxAge)
 		}
 	}
 	c.using = fresh
@@ -94,12 +118,15 @@ func followOnce(ctx context.Context, path string, c *CarSpeed) error {
 		return err
 	}
 	defer conn.Close()
+	defer c.Disconnected()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	sc := bufio.NewScanner(conn)
 	for sc.Scan() {
 		if kmh, ok := tapSpeed(sc.Text()); ok {
 			c.Set(kmh)
+		} else {
+			c.Line()
 		}
 	}
 	return sc.Err()

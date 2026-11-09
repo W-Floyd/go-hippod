@@ -40,8 +40,9 @@ import (
 // is what GeoClue's network-nmea source wants; -out is unchanged.
 //
 // -speed-tap SOCKET follows micomd's tap and puts the car's own speed (its
-// variant's "Vehicle speed") in $GPRMC and $GPVTG while a reading is under
-// -speed-max-age old and the module has a fix; else the module's speed stays.
+// variant's "Vehicle speed") in $GPRMC and $GPVTG while the module has a fix,
+// the tap is connected and talking (a line within -speed-link-age) and the
+// last reading is under -speed-max-age old; else the module's speed stays.
 //
 // -out "-" is stdout (and then -dump goes to stderr); a path on Linux becomes
 // a pty whose slave end gpsd can open (the path is a symlink to it); file:PATH
@@ -65,7 +66,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
 	speedTap := fs.String("speed-tap", "", "micomd's -tap socket: put the car's own speed in $GPRMC and $GPVTG while it is fresh (not with -query)")
 	courseStatus := fs.Bool("course-status", false, "leave the RMC/VTG course empty while the DR heading status (0x30 flags2 bit 2) is clear; check -dump first that the bit is set when the heading is good")
-	speedAge := fs.Duration("speed-max-age", 2*time.Second, "how long a -speed-tap reading stays fresh; the module's speed is used after that")
+	speedAge := fs.Duration("speed-max-age", 30*time.Second, "how long a -speed-tap reading stands with no new one (the micom sends the speed only on change); the module's speed after that")
+	linkAge := fs.Duration("speed-link-age", 3*time.Second, "how long micomd's tap may be silent before the car's speed is dropped for the module's")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -152,7 +154,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *speedTap != "" && !*query {
-		cfg.Speed = &CarSpeed{MaxAge: *speedAge, Logf: lg.Printf}
+		cfg.Speed = &CarSpeed{MaxAge: *speedAge, LinkAge: *linkAge, Logf: lg.Printf}
 		go FollowSpeedTap(ctx, *speedTap, cfg.Speed, lg.Printf)
 	}
 	st, err := Run(ctx, port, cfg)
