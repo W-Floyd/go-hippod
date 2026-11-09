@@ -39,6 +39,10 @@ import (
 // host:port (or unix:PATH), thinned to one GGA/RMC/VTG set per UTC second, which
 // is what GeoClue's network-nmea source wants; -out is unchanged.
 //
+// -speed-tap SOCKET follows micomd's tap and puts the car's own speed (its
+// variant's "Vehicle speed") in $GPRMC and $GPVTG while a reading is under
+// -speed-max-age old and the module has a fix; else the module's speed stays.
+//
 // -out "-" is stdout (and then -dump goes to stderr); a path on Linux becomes
 // a pty whose slave end gpsd can open (the path is a symlink to it); file:PATH
 // appends to a file. -out repeats: every one gets the same NMEA, so gpsd and
@@ -59,6 +63,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	gpsd := fs.Bool("gpsd", false, "better for gpsd: add $GPGSA and $GPGST, and write one position set per UTC second to -out")
 	nmeaNet := fs.String("nmea-tcp", "", "also serve the NMEA, one position set per UTC second, on this TCP host:port or unix:PATH, for GeoClue (not with -query)")
 	attach := fs.String("attach", "", "print the frames of the hippod serving this -tap socket, instead of running one")
+	speedTap := fs.String("speed-tap", "", "micomd's -tap socket: put the car's own speed in $GPRMC and $GPVTG while it is fresh (not with -query)")
+	speedAge := fs.Duration("speed-max-age", 2*time.Second, "how long a -speed-tap reading stays fresh; the module's speed is used after that")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -144,6 +150,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *speedTap != "" && !*query {
+		cfg.Speed = &CarSpeed{MaxAge: *speedAge, Logf: lg.Printf}
+		go FollowSpeedTap(ctx, *speedTap, cfg.Speed, lg.Printf)
+	}
 	st, err := Run(ctx, port, cfg)
 	lg.Print(st)
 	if err != nil && ctx.Err() == nil {

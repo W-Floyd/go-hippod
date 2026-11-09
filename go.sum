@@ -1,2 +1,6 @@
+github.com/W-Floyd/go-micomd v0.0.0-20261109023705-5e8fab990f68 h1:hVC+fOBJNll60j8i8l94LZUrB6vplL+YkqEEh0IxPwM=
+github.com/W-Floyd/go-micomd v0.0.0-20261109023705-5e8fab990f68/go.mod h1:dPrX6hXYJolWl26GO7I8IuEBxMFw++NQwifCnoMuEPE=
+go.yaml.in/yaml/v4 v4.0.0 h1:/LG1pNO84Z4l603j/xMn69CcS5OYhMQ/f7l2LoQUGuw=
+go.yaml.in/yaml/v4 v4.0.0/go.mod h1:aZqd9kCMsGL7AuUv/m/PvWLdg5sjJsZ4oHDEnfPPfY0=
 golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
 golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=

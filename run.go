@@ -24,6 +24,8 @@ type RunConfig struct {
 	AltFromDR bool
 	// Extra is Converter.Extra.
 	Extra bool
+	// Speed is Converter.Speed.
+	Speed *CarSpeed
 	// Logf reports sent frames and the final counters; nil for none.
 	Logf func(format string, args ...any)
 }
@@ -51,7 +53,7 @@ func Run(ctx context.Context, port io.ReadWriter, cfg RunConfig) (Stats, error) 
 	}
 	var st Stats
 	var dec Decoder
-	conv := &Converter{AltFromDR: cfg.AltFromDR, Extra: cfg.Extra}
+	conv := &Converter{AltFromDR: cfg.AltFromDR, Extra: cfg.Extra, Speed: cfg.Speed}
 
 	type chunk struct {
 		b   []byte

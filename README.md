@@ -116,6 +116,17 @@ with `hippod ... -nmea-tcp unix:/run/hippod-nmea.sock`. For avahi, a static
       </service>
     </service-group>
 
+### The car's speed
+
+`-speed-tap /run/micomd.sock` follows [go-micomd](https://github.com/W-Floyd/go-micomd)'s
+tap and puts the car's own speed, as its variant decodes it ("Vehicle speed"),
+in `$GPRMC` (knots) and `$GPVTG` (knots and km/h), the only sentences that carry
+one, so Android Auto and Maps show the speedometer's speed. It applies only
+while the module has a fix and the last reading is under `-speed-max-age` (2 s)
+old; otherwise the module's speed goes out unchanged. Course, position and fix
+are always the module's. The tap is read on its own goroutine and reconnected
+with backoff, so micomd need not run; each change of source is logged once.
+
 ## What is known
 
 Every layout below was read from a disassembly of the HAL, never from a capture

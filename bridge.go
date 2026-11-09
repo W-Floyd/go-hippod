@@ -16,6 +16,10 @@ type Converter struct {
 	// uses for the fix mode, the DOPs, the used satellites and the errors.
 	Extra bool
 
+	// Speed, when fresh, is the speed of $GPRMC and $GPVTG in place of the
+	// module's, the only sentences that carry one; never without a fix.
+	Speed *CarSpeed
+
 	utc   *UTC
 	raw   *RawDR
 	fix   *GPSFix
@@ -95,15 +99,21 @@ func (c *Converter) position() []string {
 	case c.AltFromDR && bit(r.Flags2, 1):
 		g.HasAlt, g.AltMSL = true, float64(r.Alt)
 	}
+	knots := r.Knots()
+	if has {
+		if k, ok := c.Speed.Knots(); ok {
+			knots = k
+		}
+	}
 	out := []string{
 		GGA(g),
 		RMC(RMCData{
 			Hour: int(u.Hour), Min: int(u.Min), Sec: int(u.Sec),
 			Day: int(u.Day), Month: int(u.Month), Year: int(u.Year),
 			Valid: has, HasPos: has, Lat: r.Lat, Lon: r.Lon,
-			Knots: r.Knots(), Course: r.Bearing, Mode: c.mode(),
+			Knots: knots, Course: r.Bearing, Mode: c.mode(),
 		}),
-		VTG(r.Bearing, r.Knots(), c.mode()),
+		VTG(r.Bearing, knots, c.mode()),
 	}
 	if c.Extra {
 		mode := 1
