@@ -37,7 +37,9 @@ type track struct{ pts []point }
 
 func (k track) at(d time.Duration) (p point, speed, heading float64) {
 	if len(k.pts) == 1 {
-		return k.pts[0], 0, 0
+		p = k.pts[0]
+		p.t = p.t.Add(d) // a still point's clock runs on: the HAL refuses a repeated time
+		return p, 0, 0
 	}
 	t := k.pts[0].t.Add(d)
 	for i := 1; i < len(k.pts); i++ {
