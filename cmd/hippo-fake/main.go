@@ -208,6 +208,7 @@ func main() {
 		f.w = c
 		f.mu.Unlock()
 		cctx, cancel := context.WithCancel(ctx)
+		go func() { <-cctx.Done(); c.Close() }() // unblocks the read on a signal
 		go f.fixes(cctx, k, *loop)
 		var d hippo.Decoder
 		buf := make([]byte, 1024)
