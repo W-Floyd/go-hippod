@@ -198,3 +198,21 @@ func TestUnknownIsRaw(t *testing.T) {
 		}
 	}
 }
+
+// Each message built by Body parses back to itself.
+func TestBodyParsesBack(t *testing.T) {
+	for _, m := range []Message{
+		&Version{Major: 6, Minor: 12, Build: 7, Year: 2023, Month: 6, Day: 21},
+		&GPSFix{TOW: 345600, Status: FixValid, Alt3D: true, PosValid: true, AltValid: true, HeadValid: true, SpeedValid: true,
+			TimeSource: 3, Lat: 37.5665, Lon: 126.978, Alt: 38, Heading: 271.5, Speed: 13.89},
+		&RawDR{Flags2: 0x0e, Flags3: 0xb0, TOW: 345600, Lat: 37.5665, Lon: 126.978, Alt: 38, Bearing: 90, SpeedRaw: 1389,
+			PosAccuracy: 5, HeadingAcc: 2},
+		&UTC{Year: 2026, Month: 11, Day: 11, Hour: 13, Min: 37, Sec: 5, PDOP: 1.5, HDOP: 0.9, VDOP: 1.2, TimeSource: 3, Visible: 9},
+	} {
+		b := m.(interface{ Body() []byte }).Body()
+		got := Parse(b)
+		if got.Describe() != m.Describe() {
+			t.Errorf("%T: %s, parsed back %s", m, m.Describe(), got.Describe())
+		}
+	}
+}

@@ -32,6 +32,14 @@ exported `Main`.
   back raw.
 * `hippo.Converter`: turns them into NMEA the way the HAL does.
 * `hippo.Run`, `hippo.OpenTTY`, `hippo.OpenPTY`: the I/O.
+* `cmd/hippo-fake`: the module's side for emulators (`Version`, `RawDR`, `GPSFix`,
+  `UTC` `.Body()`, the inverse of `Parse`): answers the HAL's version and protocol
+  queries and sends a DR solution, a fix and UTC every second from a GPX track
+  (`-gpx`, paced and timed by its points; `-loop`) or a still point (`-point
+  LAT,LON`), on a socket (`-connect unix:PATH`, a QEMU chardev). The stock HAL under
+  LIVI's tcc803x-qemu takes it: version handshake, LocationManager's gps fixes move
+  along the track with its time, speed and heading. Its position is the DR
+  solution's (0x30); the fix (0x31) alone gives 0,0.
 
 ## Command
 
